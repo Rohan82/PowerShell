@@ -4,16 +4,18 @@
 #Region Workflow: ResumeWorkflow
 workflow Resume_Workflow
 {
-    .....
-    Rename-Computer -NewName some_name -Force -Passthru
+    # Rename-Computer -NewName some_name -Force -Passthru
     Restart-Computer -Wait
     # Do some stuff
-    .....
+	InlineScript
+	{
+		Write-Host "Completed computer restart."
+	}
 }
 # Create the scheduled job properties
 $options = New-ScheduledJobOption -RunElevated -ContinueIfGoingOnBattery -StartIfOnBattery
-$secpasswd = ConvertTo-SecureString "Aa123456!" -AsPlainText -Force
-$credential = New-Object System.Management.Automation.PSCredential ("WELCOME\Administrator", $secpasswd)
+$secpasswd = ConvertTo-SecureString "" -AsPlainText -Force
+$credential = New-Object System.Management.Automation.PSCredential ("US\hinmatr", $secpasswd)
 $AtStartup = New-JobTrigger -AtStartup
 
 # Register the scheduled job

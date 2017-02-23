@@ -61,93 +61,118 @@ Function global:Write-Line
 }
 #EndRegion Function: Write-Line
 
-#Region Function: Restart-Server
-Function Restart-Server
+#Region Function: Restart-RemoteServer
+<#
+.SYNOPSIS
+	Restarts the specified remote server.
+.DESCRIPTION
+	Restarts the specified remote server using the -Force parameter. This will forcibly close all running
+	applications on the target machine. All logon sessions will also be terminated without notice. Use the
+	WhatIf switch to test the remote restart function without affecting the target machine.
+.EXAMPLE
+	Restart-RemoteServer -Server "server.domain.com" -Credential $cred -LogFolder "D:\temp"
+.EXAMPLE
+	Restart-RemoteServer -Server "server.domain.com" -Credential $cred -LogFolder "D:\temp" -WhatIf
+#>
+Function Restart-RemoteServer
 {
 	param
 	(
-		[Parameter(Mandatory=$true)][string]$server,
-		[Parameter(Mandatory=$true)][string]$logFolder
+		[Parameter(Mandatory=$true)]
+		[string]$Server,
+		[Parameter(Mandatory=$true)]
+		[System.Management.Automation.CredentialAttribute()]
+		$Credential,
+		[Parameter(Mandatory=$true)]
+		[string]$LogFolder,
+		[switch]$WhatIf
 	)
 
 	$ErrorActionPreference = "SilentlyContinue"
 
 	try
 	{
-		$LastReboot = Get-EventLog -ComputerName $server -LogName system | ?{$_.EventID -eq '6005'} | Select -ExpandProperty TimeGenerated | select -first 1
-		(Invoke-WmiMethod -ComputerName $server -Path "Win32_Service.Name='HealthService'" -Name PauseService).ReturnValue | Out-Null
-		Restart-Computer -ComputerName $server -Force
-
-		#New loop with counter, exit script if server did not reboot.
-		$max = 20;$i = 0
-		do
+		if ($WhatIf)
 		{
-		 	if($i -gt $max)
+			Restart-Computer -ComputerName $server -Credential $Credential -Force -WhatIf
+			exit
+		}
+		else
+		{
+			$LastReboot = Get-EventLog -ComputerName $server -LogName system | ?{$_.EventID -eq '6005'} | Select -ExpandProperty TimeGenerated | select -first 1
+			(Invoke-WmiMethod -ComputerName $server -Path "Win32_Service.Name='HealthService'" -Name PauseService).ReturnValue | Out-Null
+			Restart-Computer -ComputerName $server -Force
+
+			#New loop with counter, exit script if server did not reboot.
+			$max = 20;$i = 0
+			do
 			{
-		        $hash = @{
-		             "Server" =  $server
-		             "Status" = "FailedToReboot!"
-		             "LastRebootTime" = "$LastReboot"
-		             "CurrentRebootTime" = "FailedToReboot!"
-		        }
-				$newRow = New-Object PsObject -Property $hash
-			 	$rnd = Get-Random -Minimum 5 -Maximum 40
-			 	Start-Sleep -Seconds $rnd
-			 	Export-Csv $logFolder\RebootResults.csv -InputObject $newrow -Append -Force
-			    "Failed to reboot $server"
-			    exit
-			}#exit script and log failed to reboot.
+		 		if($i -gt $max)
+				{
+					$hash = @{
+						 "Server" =  $server
+						 "Status" = "FailedToReboot!"
+						 "LastRebootTime" = "$LastReboot"
+						 "CurrentRebootTime" = "FailedToReboot!"
+					}
+					$newRow = New-Object PsObject -Property $hash
+			 		$rnd = Get-Random -Minimum 5 -Maximum 40
+			 		Start-Sleep -Seconds $rnd
+			 		Export-Csv $logFolder\RebootResults.csv -InputObject $newrow -Append -Force
+					Write-Host "Failed to reboot $server" -ForegroundColor Yellow
+					exit
+				}
 			
-		    $i++
-			"Wait for server to reboot"
-		    Start-Sleep -Seconds 15
-		}#end do
-		
-		while(Test-path "\\$server\c$")
-		$max = 20;$i = 0
-		do
-		{
-			if($i -gt $max)
+				$i++
+				Write-Host "Wait for server to reboot"
+				Start-Sleep -Seconds 15
+			}
+			while(Test-path "\\$server\c$")
+			$max = 20;$i = 0
+			do
 			{
-		        $hash = @{
-		             "Server" =  $server
-		             "Status" = "FailedToComeOnline!"
-		             "LastRebootTime" = "$LastReboot"
-		             "CurrentRebootTime" = "FailedToReboot!"
-		        }
-				$newRow = New-Object PsObject -Property $hash
-				$rnd = Get-Random -Minimum 5 -Maximum 40
-				Start-Sleep -Seconds $rnd
-				Export-Csv D:\RebootResults.csv -InputObject $newrow -Append -Force
-	    		"$server did not come online"
-	    		exit
-			}#exit script and log failed to come online.
-	    	$i++
-	    	"Wait for [$server] to come online"
-	    	Start-Sleep -Seconds 15
-		}#end do
-		while(-not(Test-path "\\$server\c$"))
-		$CurrentReboot = Get-EventLog -ComputerName $server -LogName system | Where-Object {$_.EventID -eq '6005'} | Select -ExpandProperty TimeGenerated | select -first 1
-	    $hash = @{
-	             "Server" =  $server
-	             "Status" = "RebootSuccessful"
-	             "LastRebootTime" = $LastReboot
-	             "CurrentRebootTime" = "$CurrentReboot"
-	    }
-		$newRow = New-Object PsObject -Property $hash
-		$rnd = Get-Random -Minimum 5 -Maximum 40
-		Start-Sleep -Seconds $rnd
-		Export-Csv D:\RebootResults.csv -InputObject $newrow -Append -Force
+				if($i -gt $max)
+				{
+					$hash = @{
+						 "Server" =  $server
+						 "Status" = "FailedToComeOnline!"
+						 "LastRebootTime" = "$LastReboot"
+						 "CurrentRebootTime" = "FailedToReboot!"
+					}
+					$newRow = New-Object PsObject -Property $hash
+					$rnd = Get-Random -Minimum 5 -Maximum 40
+					Start-Sleep -Seconds $rnd
+					Export-Csv $logFolder\RebootResults.csv -InputObject $newrow -Append -Force
+	    			"$server did not come online"
+	    			exit
+				}
+	    		$i++
+	    		"Wait for [$server] to come online"
+	    		Start-Sleep -Seconds 15
+			}
+			while(-not(Test-path "\\$server\c$"))
+		
+			$CurrentReboot = Get-EventLog -ComputerName $server -LogName system | Where-Object {$_.EventID -eq '6005'} | Select -ExpandProperty TimeGenerated | select -first 1
+			$hash = @{
+					 "Server" =  $server
+					 "Status" = "RebootSuccessful"
+					 "LastRebootTime" = $LastReboot
+					 "CurrentRebootTime" = "$CurrentReboot"
+			}
+			$newRow = New-Object PsObject -Property $hash
+			$rnd = Get-Random -Minimum 5 -Maximum 40
+			Start-Sleep -Seconds $rnd
+			Export-Csv $logFolder\RebootResults.csv -InputObject $newrow -Append -Force
+		}
 
-	}#End try.
-
+	}
 	Catch
 	{
 		$errMsg = $_.Exception
-		"Failed with $errMsg"
+		Write-Error "Failed with $errMsg"
 	}
 }
-#EndRegion Function: Restart-Server
+#EndRegion Function: Restart-RemoteServer
 
 #Region Function: Enable-ServerRemotePowerShell
 function Enable-ServerRemotePowershell
@@ -177,7 +202,7 @@ function Enable-ServerRemotePowershell
 	}
 	catch [system.exception]
 	{
-		Write-Host "Failed to enable Remote PowerShell on $env:COMPUTERNAME. See the following error for details." -ForegroundColor Red
+		Write-Host "Failed to enable Remote PowerShell on $server. See the following error for details." -ForegroundColor Red
 		Write-Host ""
 		Write-Error $_
 	}
@@ -340,6 +365,7 @@ Function Get-SPSiteDBInfo
 	catch [system.exception]
 	{
 		Write-Host "Encountered an error while building the site information list. See error message for more information." -ForegroundColor Red
+		Write-Host ""
 		Write-Error $_
 		exit
 	}
