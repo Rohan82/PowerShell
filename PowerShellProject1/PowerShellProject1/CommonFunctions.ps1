@@ -15,13 +15,18 @@ Function global:Load-SharePointPowerShell
 {
     If ((Get-PsSnapin |?{$_.Name -eq "Microsoft.SharePoint.PowerShell"})-eq $null)
     {
-        WriteLine
-        Write-Host -ForegroundColor White " - Loading SharePoint PowerShell Snapin..."
+        Write-Line
+        Write-Host -ForegroundColor White " - Loading SharePoint PowerShell Snapin..." -NoNewline
         # Added the line below to match what the SharePoint.ps1 file implements (normally called via the SharePoint Management Shell Start Menu shortcut)
         If (Confirm-LocalSession) {$Host.Runspace.ThreadOptions = "ReuseThread"}
         Add-PsSnapin Microsoft.SharePoint.PowerShell -ErrorAction Stop | Out-Null
-        WriteLine
+		Write-Host "Done" -ForegroundColor Green
+        Write-Line
     }
+	else
+	{
+		Write-Host -ForegroundColor White " - SharePoint PowerShell Snapin is already loaded."
+	}
 }
 #EndRegion Function: Load-SharePointPowerShell
 
@@ -181,7 +186,7 @@ function Enable-ServerRemotePowershell
 	{
 		# Enable PSRemoting
 		Write-Host "Enabling PSRemoting..." -ForegroundColor Yellow -NoNewline
-		Enable-PSRemoting -Confirm:$false | Out-Null
+		Enable-PSRemoting -Force -Confirm:$false | Out-Null
 		Write-Host Done -ForegroundColor Green
 
 		# Enable Cred SSP
@@ -293,8 +298,7 @@ Function Get-SPSiteDBInfo
 {
 	param
 	(
-		$siteUrl,
-		[Parameter(Mandatory=$true)]$OutputFolder
+		$siteUrl
 	)
 	# Create a dictionary hash to translate DB server aliases to the actual instances
 	$dict = @{}
@@ -355,6 +359,7 @@ Function Get-SPSiteDBInfo
 					$siteInfo | Add-Member -type NoteProperty -Name ContentDB -Value $site.ContentDatabase.Name
 					$siteInfo | Add-Member -type NoteProperty -Name DBServer -Value $dict.Item($site.ContentDatabase.Server)
 					$siteInfo | Add-Member -type NoteProperty -Name DBAlias -Value $site.ContentDatabase.Server
+					#$siteinfo | Add-Member -Type NoteProperty -Name Quota -Value $site.Quota
 
 					# Add the current site info to the site information array
 					$siteInfos += $siteInfo
@@ -372,16 +377,142 @@ Function Get-SPSiteDBInfo
 	Write-Host "Done" -ForegroundColor Green
 
 	# Export site information to CSV file
-	if (!(Test-Path $OutputFolder))
-	{
-		# Create the specified directory for the SiteInfo.csv file
-		New-Item -ItemType Directory -Path $OutputFolder -Force | Out-Null
-	}
-	$siteInfos | Export-CSV -NoTypeInformation $OutputFolder\SiteInfo.csv
+	$siteInfos | Export-CSV -NoTypeInformation "$([Environment]::GetFolderPath("Desktop"))\SiteInfo.csv"
 	Write-Host "Finished exporting site collection database info. You can view the CSV file here:" -ForegroundColor Yellow
-	Write-Host "$OutputFolder\SiteInfo.csv"
+	Write-Host "$([Environment]::GetFolderPath("Desktop"))\SiteInfo.csv"
 }
 #EndRegion Function: Get-SPSiteDBInfo
+
+#Region Function: Get-SEPExclusions
+<#
+.Synopsis
+	Creates two files: one with list of excluded file extensions; another with excluded directories.
+.DESCRIPTION
+	Creates two files: one with list of excluded file extensions; another with excluded directories.
+	Script will automatically write the files to the desktop of the current logged on user, then open the files.
+	Dependencies: "ConvertTo-Boolean" function
+	Create By: Travis Hinman (travis.hinman@ey.com)
+.EXAMPLE
+	Get-SEPExclusions
+#>
+Function Get-SEPExclusions
+{
+	$dirExclusions = @()
+	$dirExclusions += "The following directory exclusions were found for Symantec Endpoint Protection."
+	
+	# Get directory exclusions
+	$regKeyDir = "HKLM:\SOFTWARE\Wow6432Node\Symantec\Symantec Endpoint Protection\AV\Exclusions\ScanningEngines\Directory\Admin"
+	$dirExclusionsParent = Get-Item $regKeyDir
+	$dirExclusionIDs = $dirExclusionsParent.GetSubKeyNames()
+
+	# process each subkey
+	foreach ($id in $dirExclusionIDs)
+	{
+		$exclusionKey = Get-Item "$regKeyDir\$id"
+		$exclusionDir = $exclusionKey.GetValue("DirectoryName")
+		$excludeSubDirs = $exclusionKey.GetValue("ExcludeSubDirs") | ConvertTo-Boolean
+		
+		$dir = New-Object PSObject
+		$dir | Add-Member -Type NoteProperty -Name "Directory" -Value $exclusionDir
+		$dir | Add-Member -Type NoteProperty -Name "ExcludeSubDirs" -Value $excludeSubDirs.ToString()
+		$dirExclusions += $dir
+	}
+
+	# Get extenstion exclusions
+	$regKeyExts = "HKLM:\SOFTWARE\Wow6432Node\Symantec\Symantec Endpoint Protection\AV\Exclusions\ScanningEngines\Extensions\Admin\Extensions"
+	$extExclusions = Get-Item $regKeyExts
+
+	# Get list of extensions from key
+	$exts = ($extExclusions.GetValue("Exts")).Split(",")
+
+	# Write exclusions to desktop
+	$dirExclusions | Sort Directory | Export-CSV -NoTypeInformation "$([Environment]::GetFolderPath("Desktop"))\DirExclusions.csv"
+	$exts | Sort | Out-File "$([Environment]::GetFolderPath("Desktop"))\ExtExclusions.txt" 
+
+	# Open files to present findings
+	Notepad.exe "$([Environment]::GetFolderPath("Desktop"))\DirExclusions.csv"
+	Notepad.exe "$([Environment]::GetFolderPath("Desktop"))\ExtExclusions.txt"
+}
+#EndRegion Function: Get-SEPExclusions
+
+#Region Function: ConvertTo-Boolean
+<#
+.SYNOPSIS
+	Converts common string inputs to boolean values
+.DESCRIPTION
+	Converts common string inputs to boolean values.
+	Dependencies: None
+    Created By Travis Hinman (travis.hinman@ey.com)
+.EXAMPLE
+	$value = $variable.Property | ConvertTo-Boolean
+#>
+Function ConvertTo-Boolean 
+{ 
+	param 
+	( 
+		[Parameter(Mandatory=$false,ValueFromPipeline=$true)]
+		[string]$value 
+	) 
+	switch ($value) 
+	{ 
+		"y" { return $true; } 
+		"yes" { return $true; } 
+		"true" { return $true; } 
+		"t" { return $true; } 
+		1 { return $true; } 
+		"n" { return $false; } 
+		"no" { return $false; } 
+		"false" { return $false; } 
+		"f" { return $false; }  
+		0 { return $false; } 
+	} 
+} 
+#EndRegion Function: ConvertTo-Boolean
+
+#Region Function: Get-SPServerDiskSizes
+<#
+.SYNOPSIS
+	Returns an array of disk sizes and free space for all drives on each sharepoint server in the farm.
+.DESCRIPTION
+	Returns an array of disk sizes and free space for all drives on each sharepoint server in the farm.
+    Excludes drives with drive size of $null.
+	Dependencies: "Load-SharePointPowerShell" function.
+    Created By Travis Hinman (travis.hinman@ey.com)
+.EXAMPLE
+	Get-SPServerDiskSizes | Export-CSV "D:\temp\disksizes.csv"
+#>
+Function Get-SPServerDiskSizes
+{
+	# Ensure SharePoint PowerShell Module is loaded
+	Load-SharePointPowerShell
+
+    # Create array to hold disk information
+    $driveInfo = @()
+
+    # Get all SharePoint servers in farm
+    $servers = (Get-SPServer | ?{$_.Role -ne "Invalid"}).Name
+    
+    # Process disk information for each disk on each server
+    foreach ($serv in $servers)
+    {
+        $disks = Get-WmiObject Win32_LogicalDisk -ComputerName $serv | ?{$_.Size -ne $null}
+
+        # Add disk information to array
+        foreach ($disk in $disks)
+        {
+            $servInfo = New-Object PSObject
+            $servInfo | Add-Member -Type NoteProperty -Name "ServerName" -Value $serv
+            $servInfo | Add-Member -Type NoteProperty -Name "DiskSize" -Value $([Math]::Round($disk.Size/1GB,2))
+            $servInfo | Add-Member -Type NoteProperty -Name "FreeSpace" -Value $([Math]::Round($disk.FreeSpace/1GB,2))
+            $servInfo | Add-Member -Type NoteProperty -Name "DeviceID" -Value $disk.DeviceID
+            $driveInfo += $servInfo
+        }
+    }
+    # Return array information
+    return $driveInfo
+}
+#EndRegion Function: Get-SPServerDiskSizes
+
 
 <#.Synopsis
 <!<SnippetShortDescription>!>
